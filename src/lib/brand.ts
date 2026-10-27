@@ -1,6 +1,4 @@
-import { LOGO_PNG_BASE64 } from "./brand-logo";
-
-/** School details printed on every PDF and Word report. Change them here, in one place. */
+/** School details shown in the app and printed on every PDF and Word report. Change them here, in one place. */
 export const SCHOOL = {
   name: "BRIGHT HORIZON INSTITUTE",
   phone: "201-377-1594",
@@ -17,4 +15,5 @@ export const SCHOOL = {
   colorRgb: [47 / 255, 49 / 255, 112 / 255] as const,
 } as const;
 
-export const LOGO_PNG = Buffer.from(LOGO_PNG_BASE64, "base64");
+/** The logo as served to the browser (public/bhi-logo.png). */
+export const LOGO_URL = "/bhi-logo.png";

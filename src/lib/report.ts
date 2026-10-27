@@ -4,7 +4,10 @@ import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, Header, HeadingLevel, ImageRun, Packer, PageBreak, PageNumber,
   Paragraph, Table, TableCell, TableRow, TextRun, VerticalAlign, WidthType,
 } from "docx";
-import { LOGO_PNG, SCHOOL } from "./brand";
+import { SCHOOL } from "./brand";
+import { LOGO_PNG_BASE64 } from "./brand-logo";
+
+const LOGO_PNG = Buffer.from(LOGO_PNG_BASE64, "base64");
 import { loadSheet, thisMonth, type SheetData } from "./data";
 import { hoursText, monthTitle, shiftMonth, time12, usDate } from "./sheet";
 

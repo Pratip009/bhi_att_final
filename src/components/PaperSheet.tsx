@@ -9,6 +9,7 @@ import { studentFillAction, studentStartAction } from "@/actions/student";
 import { approveMonthAction, editRowAction, signRowsAction } from "@/actions/staff";
 import { Msg } from "./forms";
 import { TimeEntry, type SchoolClock } from "./TimeEntry";
+import { Letterhead } from "./Brand";
 
 type Props = {
   mode: "student" | "staff";
@@ -104,9 +105,9 @@ export function PaperSheet(p: Props) {
 
       <div className="desk">
         <article className="paper" aria-label={`Attendance sheet for ${s.name}, ${monthTitle(p.month)}`}>
+          <Letterhead />
           <div className="paper-head">
             <div className="paper-title">INDIVIDUAL STUDENT ATTENDANCE SHEET</div>
-            <div className="seal" aria-hidden>BHI</div>
           </div>
           <table className="info">
             <tbody>

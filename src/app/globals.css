@@ -1,8 +1,8 @@
 :root {
   --desk: #e9edf2;
   --paper: #ffffff;
-  --navy: #1f3a7a;
-  --navy-deep: #142a5c;
+  --navy: #2f3170; /* Bright Horizon Institute logo navy */
+  --navy-deep: #222452;
   --ink: #1c3faa;
   --text: #1a2233;
   --muted: #5a6478;
@@ -25,7 +25,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Top bar */
 .bar { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--paper); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--navy-deep); text-decoration: none; margin-right: auto; }
-.seal { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--navy); display: grid; place-items: center; font-size: 13px; font-weight: 700; letter-spacing: .02em; color: var(--navy); }
+.brand-logo { width: 46px; height: 46px; flex: none; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-name { font-size: 18px; font-weight: 700; color: var(--navy); letter-spacing: .01em; }
+.brand-sub { font-size: 14px; font-weight: 400; color: var(--muted); }
+.welcome { margin: 0 0 4px; font-weight: 700; color: var(--navy); text-transform: uppercase; letter-spacing: .06em; font-size: 14px; }
+body { display: flex; flex-direction: column; min-height: 100vh; }
+.page { flex: 1; }
+.site-foot { background: var(--navy-deep); color: #dfe2f2; font-size: 14px; }
+.site-foot a { color: #fff; }
+.site-foot-inner { max-width: 1080px; margin: 0 auto; padding: 18px 20px; display: flex; gap: 12px 28px; justify-content: space-between; flex-wrap: wrap; align-items: center; }
+.site-foot strong { color: #fff; letter-spacing: .03em; }
+.site-foot-links { display: flex; gap: 8px 22px; flex-wrap: wrap; }
+.letterhead { display: flex; align-items: center; gap: 16px; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 2.5px solid var(--navy); font-size: 12.5px; color: #40444f; line-height: 1.5; }
+.letterhead img { flex: none; }
+.letterhead a { color: var(--navy); }
+.letterhead .sep { display: inline-block; width: 14px; }
+.letterhead-name { font-size: 22px; font-weight: 700; color: var(--navy); letter-spacing: .01em; line-height: 1.2; margin-bottom: 2px; }
 .nav { display: flex; gap: 4px; flex-wrap: wrap; }
 .nav a { padding: 8px 12px; border-radius: 6px; text-decoration: none; font-weight: 700; }
 .nav a[aria-current="page"] { background: var(--navy); color: #fff; }

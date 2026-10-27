@@ -1,10 +1,11 @@
 import Link from "next/link";
+import { BrandMark } from "@/components/Brand";
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <header className="bar">
-        <Link href="/student" className="brand"><span className="seal">BHI</span>Attendance sheet</Link>
+        <BrandMark href="/student" subtitle="Student attendance sheet" />
         <nav className="nav"><Link href="/staff">Staff</Link></nav>
       </header>
       {children}
