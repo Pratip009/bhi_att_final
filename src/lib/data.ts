@@ -1,13 +1,22 @@
 import "server-only";
 import { cols, type Entry, type Student } from "./db";
 import { env } from "./env";
-import { isClassDay, monthMinutes, sheetRows, todayIn } from "./sheet";
+import { clockIn, isClassDay, monthMinutes, sheetRows, todayIn, toMinutes, type TimeRules } from "./sheet";
 import { entriesHash } from "./hash";
 import { signatureImages } from "./signatures";
 import type { Filter } from "mongodb";
 
 export const today = () => todayIn(env().APP_TIMEZONE);
 export const thisMonth = () => today().slice(0, 7);
+
+/** Limits for times students type, from settings. */
+export const timeRules = (): TimeRules => {
+  const e = env();
+  return { windowMinutes: e.TIME_ENTRY_WINDOW_MINUTES, minMinutes: e.MIN_CLASS_MINUTES, maxMinutes: e.MAX_CLASS_MINUTES };
+};
+
+/** The school's clock right now (or at an instant), in minutes since midnight, seconds dropped. */
+export const schoolMinutes = (at = new Date()) => toMinutes(clockIn(env().APP_TIMEZONE, at, "end"));
 
 export async function holidaysBetween(from: string, to: string) {
   const list = await (await cols()).holidays.find({ _id: { $gte: from, $lte: to } }).toArray();

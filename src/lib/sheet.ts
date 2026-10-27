@@ -176,3 +176,94 @@ export function parseStudentsCsv(text: string): { students: StudentInput[]; erro
   });
   return { students, errors };
 }
+
+// ---------- Times typed by the student ----------
+
+/** Limits for times a student types. The server's clock is always the judge. */
+export type TimeRules = {
+  /** How far back a typed time may be, e.g. 15 = "up to 15 minutes ago". */
+  windowMinutes: number;
+  /** Shortest and longest day that can be recorded without staff. */
+  minMinutes: number;
+  maxMinutes: number;
+};
+export const DEFAULT_TIME_RULES: TimeRules = { windowMinutes: 15, minMinutes: 5, maxMinutes: 12 * 60 };
+
+/** Rows typed this long (or more) after the fact are flagged for staff. */
+export const LATE_ENTRY_FLAG_MINUTES = 5;
+
+const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+/**
+ * Reads a typed time: "09:05", "9:05", "9.05", "905", "0905", "9:05 am", "9:05pm", "12:10 a.m.".
+ * Returns "HH:MM" (24-hour) or null. Without am/pm the hour is read as 24-hour.
+ */
+export function parseTime(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim().toLowerCase().replace(/\s+/g, " ").replace(/\./g, (c, i, str) => (/\d/.test(str[i - 1] ?? "") && /\d/.test(str[i + 1] ?? "") ? ":" : ""));
+  const m = /^(\d{1,2}):?(\d{2})(?::\d{2})? ?(am|pm|a|p)?$/.exec(s);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2]);
+  const ap = m[3]?.[0];
+  if (min > 59) return null;
+  if (ap) {
+    if (h < 1 || h > 12) return null;
+    h = (h % 12) + (ap === "p" ? 12 : 0);
+  } else if (h > 23) return null;
+  return hhmm(h * 60 + min);
+}
+
+export type TimeCheck = { ok: true; time: string; lateBy: number } | { ok: false; error: string };
+
+/**
+ * Is a typed start or end time believable right now? Used in the browser (instant feedback) and
+ * again on the server (the only check that counts). `nowMinutes` is the school's clock, in
+ * minutes since midnight, with seconds dropped.
+ *
+ * Rules:
+ *  - the time has already happened (no future times);
+ *  - it is from the last `windowMinutes` (anything older is a staff correction);
+ *  - an end time is after the start, no earlier than the moment the start was entered (the student
+ *    was demonstrably still here then), and the day is between minMinutes and maxMinutes long.
+ * AM/PM mix-ups are spotted and explained.
+ */
+export function checkTypedTime(
+  kind: "start" | "end",
+  raw: unknown,
+  nowMinutes: number,
+  rules: TimeRules,
+  start?: { time: string; enteredAtMinutes: number | null },
+): TimeCheck {
+  const t = parseTime(raw);
+  if (!t) return { ok: false, error: "Enter the time like 9:05 am." };
+  const m = toMinutes(t);
+  const earliest = Math.max(0, nowMinutes - rules.windowMinutes);
+  const inWindow = (x: number) => x >= earliest && x <= nowMinutes;
+  const now = time12(hhmm(nowMinutes));
+
+  if (m > nowMinutes) {
+    if (inWindow(m - 720)) return { ok: false, error: `${time12(t)} hasn't happened yet. Did you mean ${time12(hhmm(m - 720))}?` };
+    return { ok: false, error: `${time12(t)} hasn't happened yet. It's ${now} now.` };
+  }
+  if (m < earliest) {
+    if (inWindow(m + 720)) return { ok: false, error: `That's ${time12(t)}. Did you mean ${time12(hhmm(m + 720))}?` };
+    return {
+      ok: false,
+      error: `You can only enter a time from the last ${rules.windowMinutes} minutes (${time12(hhmm(earliest))} to ${now}). Ask a staff member to fix an earlier time.`,
+    };
+  }
+
+  if (kind === "end") {
+    if (!start || !TIME_RE.test(start.time)) return { ok: false, error: "Enter your start time first." };
+    const s = toMinutes(start.time);
+    if (m <= s) return { ok: false, error: `Your end time must be after your start time (${time12(start.time)}).` };
+    if (start.enteredAtMinutes != null && m < start.enteredAtMinutes) {
+      return { ok: false, error: `You entered your start time at ${time12(hhmm(start.enteredAtMinutes))}, so you can't have left before then.` };
+    }
+    const length = m - s;
+    if (length < rules.minMinutes) return { ok: false, error: `That's only ${length} minute${length === 1 ? "" : "s"} after you started. Enter your end time when class is over.` };
+    if (length > rules.maxMinutes) return { ok: false, error: `That's more than ${hoursText(rules.maxMinutes)} hours. Ask a staff member.` };
+  }
+  return { ok: true, time: t, lateBy: nowMinutes - m };
+}

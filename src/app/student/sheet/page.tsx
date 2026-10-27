@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentStudent } from "@/lib/auth";
-import { loadSheet, sheetHeader, thisMonth } from "@/lib/data";
+import { loadSheet, sheetHeader, thisMonth, timeRules } from "@/lib/data";
+import { env } from "@/lib/env";
 import { MONTH_RE, monthTitle, shiftMonth } from "@/lib/sheet";
 import { setMySignatureAction, studentSignOutAction } from "@/actions/student";
 import { SignatureOnFile } from "@/components/SignatureCapture";
@@ -23,8 +24,8 @@ export default async function MySheet({ searchParams }: { searchParams: Promise<
   const hint = !todayRow ? null
     : todayRow.holiday ? `Today is a holiday (${todayRow.holiday}).`
     : e && e.status !== "PRESENT" ? `Today is marked ${e.status.toLowerCase()}. Ask a staff member if that's wrong.`
-    : !e?.startTime ? "Today: tap “Tap to start” when you arrive."
-    : !e.endTime ? "Today: tap “Tap to fill” when class is over. It writes your end time and signs for you."
+    : !e?.startTime ? "Today: tap “Enter start time” when you arrive and type the time you got here."
+    : !e.endTime ? "Today: when class is over, tap “Enter end time” and type the time you left. Your signature is added for you."
     : "You're done for today.";
   return (
     <main className="wrap" style={{ maxWidth: 1040 }}>
@@ -46,7 +47,8 @@ export default async function MySheet({ searchParams }: { searchParams: Promise<
         </section>
       )}
       {month === now && hint && student.signatureId && <p className="msg info no-print">{hint}</p>}
-      <PaperSheet mode="student" student={sheetHeader(student)} month={month} rows={sheet.rows} totalMinutes={sheet.totalMinutes} approval={sheet.approval} approvalCurrent={sheet.approvalCurrent} images={sheet.images} />
+      <PaperSheet mode="student" student={sheetHeader(student)} month={month} rows={sheet.rows} totalMinutes={sheet.totalMinutes} approval={sheet.approval} approvalCurrent={sheet.approvalCurrent} images={sheet.images}
+        clock={month === now ? { tz: env().APP_TIMEZONE, serverNow: Date.now(), rules: timeRules() } : undefined} />
     </main>
   );
 }

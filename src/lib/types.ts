@@ -63,10 +63,16 @@ export type Entry = {
   studentId: string;
   date: string;
   status: EntryStatus;
-  startAt: Date | null; // exact server time of "Start"
-  endAt: Date | null;
-  startTime: string | null; // HH:MM shown on the sheet
+  startAt: Date | null; // exact server time the student saved their start time
+  endAt: Date | null; // exact server time the student saved their end time
+  startTime: string | null; // HH:MM shown on the sheet (typed by the student, checked by the server)
   endTime: string | null;
+  /**
+   * How many minutes before saving the typed time was (0 = typed "now"). Lets staff see rows
+   * entered after the fact. null when staff wrote the time, or for rows from before typed times.
+   */
+  startLateBy?: number | null;
+  endLateBy?: number | null;
   minutes: number | null;
   studentSignature: Signature | null;
   staffSignature: StaffSignature | null;

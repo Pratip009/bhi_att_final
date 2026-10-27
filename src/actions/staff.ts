@@ -118,7 +118,12 @@ export async function editRowAction(studentId: string, date: string, _: ActionSt
   await entries.updateOne(
     { _id: id },
     {
-      $set: { ...after, staffSignature: null, updatedAt: now },
+      $set: {
+        ...after, staffSignature: null, updatedAt: now,
+        // A time written by staff wasn't typed late by the student, so its late-entry flag goes.
+        ...(before?.startTime !== after.startTime ? { startLateBy: null } : {}),
+        ...(before?.endTime !== after.endTime ? { endLateBy: null } : {}),
+      },
       $setOnInsert: { studentId, date, startAt: null, endAt: null, studentSignature: null },
       $push: { history: { at: now, byId: staff._id, byName: staff.name, what, reason: reason || "filled in by staff" } },
     },

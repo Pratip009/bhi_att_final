@@ -4,17 +4,21 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ActionState } from "@/lib/action";
-import { hoursText, time12 } from "@/lib/sheet";
+import { LATE_ENTRY_FLAG_MINUTES, hoursText, time12 } from "@/lib/sheet";
 import { markAbsentAction, signRowsAction } from "@/actions/staff";
 import { Msg } from "./forms";
 
 export type BoardRow = {
   id: string; name: string; course: string;
   status: string | null; start: string | null; end: string | null; minutes: number | null;
+  /** Minutes after the fact the student typed each time (null if staff wrote it). */
+  startLateBy: number | null; endLateBy: number | null;
   studentSigned: boolean; staffSigned: boolean;
 };
 
 /** One day, every student with class that day: who started, ended, signed; staff sign many rows at once. */
+const isLate = (m: number | null) => m != null && m >= LATE_ENTRY_FLAG_MINUTES;
+
 export function TodayBoard({ date, month, rows, holiday, hasSaved, isToday }: {
   date: string; month: string; rows: BoardRow[]; holiday: string | null; hasSaved: boolean; isToday: boolean;
 }) {
@@ -35,6 +39,7 @@ export function TodayBoard({ date, month, rows, holiday, hasSaved, isToday }: {
     studentSigned: rows.filter((r) => r.studentSigned).length,
     staffSigned: rows.filter((r) => r.staffSigned).length,
     notStarted: rows.filter((r) => !r.start && r.status === null).length,
+    late: rows.filter((r) => isLate(r.startLateBy) || isLate(r.endLateBy)).length,
   };
   const run = (fn: () => Promise<ActionState>) => start(async () => {
     try { setMsg(await fn()); } catch { setMsg({ error: "Something went wrong. Try again." }); }
@@ -53,6 +58,12 @@ export function TodayBoard({ date, month, rows, holiday, hasSaved, isToday }: {
     run(() => markAbsentAction(date, {}, fd));
   };
   const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const timeTd = (t: string | null, lateBy: number | null) => (
+    <td>
+      {t ? time12(t) : <span className="muted">–</span>}
+      {t && isLate(lateBy) && <span className="tag warn" style={{ marginLeft: 6 }} title="The student typed this time after the fact">+{lateBy} min</span>}
+    </td>
+  );
   const tag = (ok: boolean, yes: string, no = "–") => <span className={`tag ${ok ? "ok" : ""}`}>{ok ? yes : no}</span>;
 
   return (
@@ -61,6 +72,9 @@ export function TodayBoard({ date, month, rows, holiday, hasSaved, isToday }: {
       <p className="lead">
         {rows.length} with class · {counts.started} started · {counts.ended} ended · {counts.studentSigned} signed by student · {counts.staffSigned} signed by staff
       </p>
+      {counts.late > 0 && (
+        <p className="msg info">{counts.late} row{counts.late === 1 ? " has a time" : "s have times"} typed {LATE_ENTRY_FLAG_MINUTES}+ minutes after the fact (marked <span className="tag warn">+min</span>). Check before signing.</p>
+      )}
       <div className="row no-print" style={{ marginBottom: 12 }}>
         <input className="search" style={{ minHeight: 46, fontSize: 17, maxWidth: 360 }} placeholder="Find a student or course" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a student or course" />
         <button className="btn ghost" onClick={() => setPicked(new Set(shown.filter(ready).map((r) => r.id)))}>Select all ready to sign ({shown.filter(ready).length})</button>
@@ -80,7 +94,7 @@ export function TodayBoard({ date, month, rows, holiday, hasSaved, isToday }: {
                 <td className="muted">{r.course}</td>
                 {r.status && r.status !== "PRESENT"
                   ? <td colSpan={3}><span className="tag no">{r.status.toLowerCase()}</span></td>
-                  : <><td>{r.start ? time12(r.start) : <span className="muted">–</span>}</td><td>{r.end ? time12(r.end) : <span className="muted">–</span>}</td><td>{hoursText(r.minutes)}</td></>}
+                  : <>{timeTd(r.start, r.startLateBy)}{timeTd(r.end, r.endLateBy)}<td>{hoursText(r.minutes)}</td></>}
                 <td>{tag(r.studentSigned, "signed")}</td>
                 <td>{tag(r.staffSigned, "signed")}</td>
               </tr>

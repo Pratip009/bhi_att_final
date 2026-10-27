@@ -4,10 +4,11 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ActionState } from "@/lib/action";
 import type { Entry, MonthApproval, Student } from "@/lib/types";
-import { hoursText, monthTitle, time12, usDate, type SheetRow } from "@/lib/sheet";
+import { LATE_ENTRY_FLAG_MINUTES, clockIn, hoursText, monthTitle, time12, toMinutes, usDate, type SheetRow } from "@/lib/sheet";
 import { studentFillAction, studentStartAction } from "@/actions/student";
 import { approveMonthAction, editRowAction, signRowsAction } from "@/actions/staff";
 import { Msg } from "./forms";
+import { TimeEntry, type SchoolClock } from "./TimeEntry";
 
 type Props = {
   mode: "student" | "staff";
@@ -20,9 +21,20 @@ type Props = {
   hasSavedSignature?: boolean;
   /** Signature images on this page, by id. */
   images: Record<string, string>;
+  /** Student mode: the school's clock and the limits for typed times. */
+  clock?: SchoolClock;
 };
 
 const STATUS_WORD: Record<string, string> = { ABSENT: "Absent", EXCUSED: "Excused", HOLIDAY: "Holiday" };
+/** How many minutes after the fact the student typed this time (null if staff wrote it). */
+const late = (e: Entry, which: "startTime" | "endTime") => (which === "startTime" ? e.startLateBy : e.endLateBy) ?? null;
+/** "saved 9:12:03 am, typed 7 min later", for the "exact recorded times" view. */
+const saved = (e: Entry, which: "startTime" | "endTime") => {
+  const at = which === "startTime" ? e.startAt : e.endAt;
+  const lag = late(e, which);
+  if (!at || lag === null) return at ? `saved ${exact(at)}` : "written by staff";
+  return `saved ${exact(at)}${lag > 0 ? `, ${lag} min later` : ""}`;
+};
 const exact = (d: Date | null) => (d ? new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }) : "");
 
 export function PaperSheet(p: Props) {
@@ -32,6 +44,7 @@ export function PaperSheet(p: Props) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [evidence, setEvidence] = useState(false);
   const [editing, setEditing] = useState<SheetRow | null>(null);
+  const [typing, setTyping] = useState<"start" | "end" | null>(null);
   const staff = p.mode === "staff";
   const key = (date: string) => `${p.student._id}:${date}`;
 
@@ -41,17 +54,21 @@ export function PaperSheet(p: Props) {
       router.refresh();
     });
 
-  // ----- Student: today's row -----
+  // ----- Student: today's row (the student types their times) -----
+  const todayRow = p.rows.find((r) => r.isToday);
   const studentCell = (r: SheetRow, col: "start" | "end") => {
-    if (staff || !r.isToday || r.holiday) return null;
+    if (staff || !r.isToday || r.holiday || !p.clock) return null;
     const e = r.entry;
     if (e && e.status !== "PRESENT") return null;
-    if (col === "start" && !e?.startTime) return <button className="fill go" disabled={pending} onClick={() => run(() => studentStartAction({}))}>Tap to start</button>;
-    if (col === "end" && e?.startTime && !e.endTime) {
-      return <button className="fill go" disabled={pending} onClick={() => { if (window.confirm("Fill today now? This writes your end time and signs your row. Only do this when class is over.")) run(() => studentFillAction({})); }}>Tap to fill</button>;
-    }
+    if (col === "start" && !e?.startTime) return <button className="fill go" disabled={pending} onClick={() => setTyping("start")}>Enter start time</button>;
+    if (col === "end" && e?.startTime && !e.endTime) return <button className="fill go" disabled={pending} onClick={() => setTyping("end")}>Enter end time</button>;
     return null;
   };
+  const startForEnd = (() => {
+    const e = todayRow?.entry;
+    if (!e?.startTime || !p.clock) return undefined;
+    return { time: e.startTime, enteredAtMinutes: e.startAt ? toMinutes(clockIn(p.clock.tz, new Date(e.startAt), "end")) : null };
+  })();
 
   // ----- Staff: sign selected rows -----
   const signable = (r: SheetRow) => !r.isFuture && !r.entry?.staffSignature && (!!r.holiday || (!!r.entry && (r.entry.status !== "PRESENT" || (!!r.entry.startTime && !!r.entry.endTime))));
@@ -68,7 +85,10 @@ export function PaperSheet(p: Props) {
     if (t) return (
       <>
         <span className="hand">{time12(t).replace(" ", "")}</span>
-        {evidence && <span className="small muted" style={{ display: "block" }}>{exact(which === "startTime" ? e!.startAt : e!.endAt) || "entered by staff"}</span>}
+        {evidence && <span className="small muted" style={{ display: "block" }}>{saved(e!, which)}</span>}
+        {staff && !evidence && (late(e!, which) ?? 0) >= LATE_ENTRY_FLAG_MINUTES && (
+          <span className="tag warn no-print" style={{ display: "block", marginTop: 2 }} title={saved(e!, which)}>entered {late(e!, which)} min later</span>
+        )}
       </>
     );
     return studentCell(r, which === "startTime" ? "start" : "end");
@@ -78,7 +98,7 @@ export function PaperSheet(p: Props) {
   return (
     <>
       <div className="no-print row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
-        <label className="small"><input type="checkbox" className="chk" checked={evidence} onChange={(e) => setEvidence(e.target.checked)} /> Show exact recorded times</label>
+        <label className="small"><input type="checkbox" className="chk" checked={evidence} onChange={(e) => setEvidence(e.target.checked)} /> Show when each time was saved</label>
         <Msg state={msg} />
       </div>
 
@@ -165,6 +185,14 @@ export function PaperSheet(p: Props) {
         <p className="no-print"><button className="btn ghost" onClick={() => setPicked(new Set(p.rows.filter(signable).map((r) => key(r.date))))}>Select all rows ready for staff signature</button></p>
       )}
 
+      {typing && p.clock && (
+        <TimeEntry
+          kind={typing} clock={p.clock} start={typing === "end" ? startForEnd : undefined}
+          action={typing === "start" ? studentStartAction : studentFillAction}
+          onCancel={() => setTyping(null)}
+          onDone={(r) => { setTyping(null); setMsg(r); router.refresh(); }}
+        />
+      )}
       {editing && <EditRow studentId={s._id} row={editing} onClose={() => { setEditing(null); router.refresh(); }} />}
     </>
   );

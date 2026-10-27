@@ -7,11 +7,10 @@ import { z } from "zod";
 import { audit, cols, isDuplicateKey, rateLimit, type Entry } from "@/lib/db";
 import { currentStudent, endStudentSession, startStudentSession } from "@/lib/auth";
 import { env } from "@/lib/env";
-import { holidaysBetween, today } from "@/lib/data";
-import { clockIn, isClassDay, minutesBetween, time12 } from "@/lib/sheet";
+import { holidaysBetween, schoolMinutes, timeRules } from "@/lib/data";
+import { checkTypedTime, isClassDay, minutesBetween, time12, todayIn } from "@/lib/sheet";
 import { checkSignaturePng, saveSignature } from "@/lib/signatures";
 import type { ActionState } from "@/lib/action";
-
 
 /** Student taps their name, then enters their PIN. */
 export async function pinSignInAction(studentId: string, _: ActionState, fd: FormData): Promise<ActionState> {
@@ -31,26 +30,37 @@ export async function studentSignOutAction() {
   redirect("/student");
 }
 
-/** Checks the student may write on today's row. Returns the student and today, or an error. */
-async function todayFor() {
+/**
+ * Checks the student may write on today's row. Everything uses one instant (`now`), so the date and
+ * the clock can't disagree around midnight. Returns the student and today, or an error.
+ */
+async function todayFor(now: Date) {
   const student = await currentStudent();
   if (!student) return { error: "You were signed out. Find your name again." } as const;
-  const date = today();
+  const date = todayIn(env().APP_TIMEZONE, now);
   if (!isClassDay(student, date)) return { error: "You don't have class today." } as const;
   const holiday = (await holidaysBetween(date, date)).get(date);
   if (holiday) return { error: `Today is a holiday (${holiday}).` } as const;
   return { student, date, id: `${student._id}:${date}` } as const;
 }
 
-/** "Start": writes today's start time from the server clock. Only once. */
-export async function studentStartAction(_: ActionState): Promise<ActionState> {
-  const t = await todayFor();
-  if ("error" in t) return { error: t.error };
-  const { entries } = await cols();
+/**
+ * "Start": the student types the time they arrived. The server checks it against its own clock
+ * (no future times, nothing older than the allowed window) and writes it once. The exact moment
+ * it was saved is kept too, so staff can see when it was entered.
+ */
+export async function studentStartAction(_: ActionState, fd: FormData): Promise<ActionState> {
   const now = new Date();
-  const startTime = clockIn(env().APP_TIMEZONE, now, "start");
+  const t = await todayFor(now);
+  if ("error" in t) return { error: t.error };
+  if (!(await rateLimit(`time:${t.student._id}`, 30, 600))) return { error: "Too many tries. Wait a few minutes, or ask a staff member." };
+  const checked = checkTypedTime("start", fd.get("time"), schoolMinutes(now), timeRules());
+  if (!checked.ok) return { error: checked.error, fieldErrors: { time: checked.error } };
+  const { entries } = await cols();
+  const startTime = checked.time;
   const fresh: Entry = {
     _id: t.id, studentId: t.student._id, date: t.date, status: "PRESENT", startAt: now, endAt: null, startTime, endTime: null, minutes: null,
+    startLateBy: checked.lateBy, endLateBy: null,
     studentSignature: null, staffSignature: null, note: "", history: [], updatedAt: now,
   };
   try {
@@ -59,15 +69,18 @@ export async function studentStartAction(_: ActionState): Promise<ActionState> {
     if (!isDuplicateKey(e)) throw e;
     // A row already exists: staff may have marked the day (e.g. absent before the student arrived).
     const res = await entries.updateOne(
-      { _id: t.id, startAt: null, staffSignature: null },
-      { $set: { status: "PRESENT", startAt: now, startTime, updatedAt: now }, $push: { history: { at: now, byId: t.student._id, byName: t.student.name, what: `start ${startTime}`, reason: "student" } } },
+      { _id: t.id, startTime: null, staffSignature: null },
+      {
+        $set: { status: "PRESENT", startAt: now, startTime, startLateBy: checked.lateBy, updatedAt: now },
+        $push: { history: { at: now, byId: t.student._id, byName: t.student.name, what: `start ${startTime}`, reason: "entered by student" } },
+      },
     );
     if (!res.modifiedCount) {
       const e2 = await entries.findOne({ _id: t.id });
-      return e2?.startTime ? { ok: true, message: `You already started at ${time12(e2.startTime)}.` } : { error: "Today's row is already signed by staff. Ask a staff member." };
+      return e2?.startTime ? { ok: true, message: `Your start time is already on the sheet: ${time12(e2.startTime)}.` } : { error: "Today's row is already signed by staff. Ask a staff member." };
     }
   }
-  await audit(t.student._id, "student.start", t.id, { startAt: now.toISOString() });
+  await audit(t.student._id, "student.start", t.id, { typed: startTime, savedAt: now.toISOString(), lateBy: checked.lateBy });
   revalidatePath("/student/sheet");
   return { ok: true, message: `Start time written: ${time12(startTime)}.` };
 }
@@ -89,31 +102,39 @@ export async function setMySignatureAction(_: ActionState, fd: FormData): Promis
   if (!res.modifiedCount) return { error: "Your signature is already on file." };
   await audit(student._id, "student.signature_on_file", student._id, { signatureId: id, source });
   revalidatePath("/student/sheet");
-  return { ok: true, message: "Signature saved. From now on, just tap Fill at the end of each class." };
+  return { ok: true, message: "Signature saved. From now on, it's added for you when you enter your end time." };
 }
 
 /**
- * "Fill" at the end of class: writes the end time and the hours, and signs the row with the
- * student's signature on file. Only after Start, only once.
+ * "End" at the end of class: the student types the time they left. The server checks it (after the
+ * start, not before the start was entered, not in the future, within the window, a sensible length),
+ * then writes the end time and hours and signs the row with the student's signature on file. Once.
  */
-export async function studentFillAction(_: ActionState): Promise<ActionState> {
-  const t = await todayFor();
+export async function studentFillAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const now = new Date();
+  const t = await todayFor(now);
   if ("error" in t) return { error: t.error };
   if (!t.student.signatureId) return { error: "Put your signature on file first." };
+  if (!(await rateLimit(`time:${t.student._id}`, 30, 600))) return { error: "Too many tries. Wait a few minutes, or ask a staff member." };
   const { entries } = await cols();
   const entry = await entries.findOne({ _id: t.id });
-  if (!entry?.startTime) return { error: "Tap Start first." };
+  if (!entry || entry.status !== "PRESENT") return { error: entry ? `Today is marked ${entry.status.toLowerCase()}. Ask a staff member.` : "Enter your start time first." };
+  if (!entry.startTime) return { error: "Enter your start time first." };
   if (entry.endTime) return { ok: true, message: `Today is already filled (ended ${time12(entry.endTime)}).` };
-  const now = new Date();
-  const endTime = clockIn(env().APP_TIMEZONE, now, "end");
+  const checked = checkTypedTime("end", fd.get("time"), schoolMinutes(now), timeRules(), {
+    time: entry.startTime,
+    enteredAtMinutes: entry.startAt && todayIn(env().APP_TIMEZONE, entry.startAt) === t.date ? schoolMinutes(entry.startAt) : null,
+  });
+  if (!checked.ok) return { error: checked.error, fieldErrors: { time: checked.error } };
+  const endTime = checked.time;
   const minutes = minutesBetween(entry.startTime, endTime);
-  if (minutes === null) return { error: "Your end time must be after your start time. Tap Fill when class is over." };
+  if (minutes === null) return { error: "Your end time must be after your start time." };
   const res = await entries.updateOne(
-    { _id: t.id, endAt: null, startTime: entry.startTime, staffSignature: null },
-    { $set: { endAt: now, endTime, minutes, studentSignature: { id: t.student.signatureId, at: now }, updatedAt: now } },
+    { _id: t.id, endTime: null, startTime: entry.startTime, status: "PRESENT", staffSignature: null },
+    { $set: { endAt: now, endTime, minutes, endLateBy: checked.lateBy, studentSignature: { id: t.student.signatureId, at: now }, updatedAt: now } },
   );
   if (!res.modifiedCount) return { error: "Today's row changed. Reload the page." };
-  await audit(t.student._id, "student.fill", t.id, { endAt: now.toISOString(), minutes, signatureId: t.student.signatureId });
+  await audit(t.student._id, "student.fill", t.id, { typed: endTime, savedAt: now.toISOString(), lateBy: checked.lateBy, minutes, signatureId: t.student.signatureId });
   revalidatePath("/student/sheet");
   return { ok: true, message: `Done for today: ${time12(entry.startTime)} to ${time12(endTime)}, signed.` };
 }
