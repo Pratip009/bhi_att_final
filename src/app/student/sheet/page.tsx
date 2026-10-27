@@ -37,6 +37,7 @@ export default async function MySheet({ searchParams }: { searchParams: Promise<
           <strong>{monthTitle(month)}</strong>
           {month < now && <Link className="btn ghost" href={`/student/sheet?month=${shiftMonth(month, 1)}`}>{monthTitle(shiftMonth(month, 1)).split(" ")[0]} ›</Link>}
           <a className="btn" href={`/api/report/${student._id}?month=${month}&format=pdf`}>Download PDF</a>
+          <a className="btn ghost" href={`/api/report/${student._id}?month=${month}&format=docx`}>Download Word (DOCX)</a>
         </div>
       </div>
       {!student.signatureId && (
